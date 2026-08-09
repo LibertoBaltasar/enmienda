@@ -17,7 +17,22 @@ import {
   getContent,
   replaceContent,
   applyParagraphChange,
+  setDocName,
 } from './editor';
+
+// Tauri file system (only available in Tauri, not browser dev)
+let tauriDialog: any = null;
+let tauriFs: any = null;
+async function loadTauriPlugins() {
+  try {
+    tauriDialog = await import('@tauri-apps/plugin-dialog');
+    tauriFs = await import('@tauri-apps/plugin-fs');
+    return true;
+  } catch {
+    console.log('⚠️ Tauri plugins no disponibles (modo navegador)');
+    return false;
+  }
+}
 
 // ── Diff types ─────────────────────────────────────────
 
@@ -38,13 +53,18 @@ let currentMergeDiffs: ParagraphDiff[] = [];
 
 // ── Init ───────────────────────────────────────────────
 
-function main(): void {
+async function main(): Promise<void> {
   const container = document.getElementById('editor-container');
   if (!container) throw new Error('No se encontró #editor-container');
+
+  // Try to load Tauri plugins (file dialogs, fs)
+  await loadTauriPlugins();
 
   initEditor(container);
 
   // Toolbar
+  document.getElementById('btn-open')?.addEventListener('click', handleOpen);
+  document.getElementById('btn-save')?.addEventListener('click', handleSave);
   document.getElementById('btn-snapshot')?.addEventListener('click', handleSnapshot);
   document.getElementById('btn-history')?.addEventListener('click', toggleSidebar);
   document.getElementById('btn-close-sidebar')?.addEventListener('click', closeSidebar);
@@ -56,13 +76,98 @@ function main(): void {
 
   // Keyboard shortcuts
   document.addEventListener('keydown', (e) => {
-    if ((e.ctrlKey || e.metaKey) && e.key === 's') {
+    const mod = e.ctrlKey || e.metaKey;
+
+    if (mod && e.shiftKey && e.key === 'S') {
+      // Ctrl+Shift+S → snapshot
       e.preventDefault();
       handleSnapshot();
+    } else if (mod && e.key === 's') {
+      // Ctrl+S → save file
+      e.preventDefault();
+      handleSave();
+    } else if (mod && e.key === 'o') {
+      // Ctrl+O → open file
+      e.preventDefault();
+      handleOpen();
     }
   });
 
   renderSnapshotList();
+}
+
+// ── File system handlers ───────────────────────────────
+
+let currentFilePath: string | null = null;
+
+async function handleOpen(): Promise<void> {
+  if (!tauriDialog) {
+    alert('Abrir archivos solo funciona en la app de escritorio (Tauri).');
+    return;
+  }
+
+  try {
+    const selected = await tauriDialog.open({
+      multiple: false,
+      filters: [{ name: 'Markdown', extensions: ['md'] }],
+    });
+
+    if (!selected) return; // User cancelled
+
+    const filePath = typeof selected === 'string' ? selected : selected.path;
+    const content = await tauriFs.readTextFile(filePath);
+
+    // Create snapshot before loading new file
+    if (getContent().trim()) {
+      createSnapshot('Auto: antes de abrir archivo');
+    }
+
+    replaceContent(content);
+    currentFilePath = filePath;
+
+    // Update doc name in toolbar
+    const fileName = filePath.split('/').pop() || filePath.split('\\').pop() || 'Sin título.md';
+    setDocName(fileName);
+    const el = document.getElementById('doc-name');
+    if (el) el.textContent = fileName;
+
+    renderSnapshotList();
+  } catch (err: any) {
+    alert(`Error al abrir archivo: ${err}`);
+  }
+}
+
+async function handleSave(): Promise<void> {
+  if (!tauriFs) {
+    alert('Guardar archivos solo funciona en la app de escritorio (Tauri).');
+    return;
+  }
+
+  try {
+    if (!currentFilePath) {
+      // No file open yet → show save dialog
+      if (!tauriDialog) return;
+      const selected = await tauriDialog.save({
+        filters: [{ name: 'Markdown', extensions: ['md'] }],
+      });
+      if (!selected) return;
+      currentFilePath = selected;
+    }
+
+    // currentFilePath is guaranteed non-null here
+    const savePath = currentFilePath!;
+    await tauriFs.writeTextFile(savePath, getContent());
+
+    // Update doc name
+    const fileName = savePath.split('/').pop() || savePath.split('\\').pop() || 'Sin título.md';
+    setDocName(fileName);
+    const el = document.getElementById('doc-name');
+    if (el) el.textContent = fileName;
+
+    flashButton('btn-save');
+  } catch (err: any) {
+    alert(`Error al guardar: ${err}`);
+  }
 }
 
 // ── Snapshot handlers ──────────────────────────────────
