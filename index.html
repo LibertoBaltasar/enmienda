@@ -1,13 +1,56 @@
-<!doctype html>
-<html lang="en">
+<!DOCTYPE html>
+<html lang="es">
   <head>
     <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>enmienda-temp</title>
+    <title>Enmienda — Corrector editorial</title>
+    <link rel="stylesheet" href="/src/style.css" />
   </head>
   <body>
-    <div id="app"></div>
+    <div id="app">
+      <!-- Toolbar -->
+      <header id="toolbar">
+        <div class="toolbar-left">
+          <span class="app-name">Enmienda</span>
+          <span class="doc-name" id="doc-name">Sin título.md</span>
+        </div>
+        <div class="toolbar-center">
+          <button id="btn-snapshot" title="Crear instantánea">📸 Instantánea</button>
+          <button id="btn-history" title="Historial de versiones">🕐 Historial</button>
+        </div>
+        <div class="toolbar-right">
+          <span id="word-count">0 palabras</span>
+        </div>
+      </header>
+
+      <!-- Main area: editor + sidebar -->
+      <div id="main-area">
+        <div id="editor-container"></div>
+        <aside id="sidebar" class="hidden">
+          <div class="sidebar-header">
+            <h3>Historial</h3>
+            <button id="btn-close-sidebar">✕</button>
+          </div>
+          <div id="snapshot-list">
+            <p class="empty-state">Sin instantáneas todavía.<br>Crea una con 📸</p>
+          </div>
+        </aside>
+      </div>
+
+      <!-- Merge panel (bottom, hidden by default) -->
+      <div id="merge-panel" class="hidden">
+        <div class="merge-header">
+          <h3>Comparando: <span id="merge-label"></span></h3>
+          <div class="merge-actions">
+            <button id="btn-accept-all">✓ Aceptar todo</button>
+            <button id="btn-reject-all">✗ Rechazar todo</button>
+            <button id="btn-close-merge">Cerrar</button>
+          </div>
+        </div>
+        <div id="merge-content"></div>
+      </div>
+    </div>
+
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>
