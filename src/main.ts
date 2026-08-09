@@ -5,7 +5,7 @@
  *   - Editor initialization
  *   - Toolbar buttons (snapshot, history)
  *   - Sidebar (snapshot list)
- *   - Merge panel (diff view)
+ *   - Merge panel (paragraph-level diff view with accept/reject)
  */
 
 import {
@@ -15,6 +15,8 @@ import {
   getSnapshotContent,
   deleteSnapshot,
   getContent,
+  replaceContent,
+  applyParagraphChange,
 } from './editor';
 
 // ── Diff types ─────────────────────────────────────────
@@ -25,28 +27,29 @@ interface ParagraphDiff {
   op: DiffOp;
   text: string;
   snapshotText?: string;
+  paragraphIndex: number;
+  oldText?: string;
 }
 
 // ── State ──────────────────────────────────────────────
 
 let currentMergeSnapshotId: string | null = null;
+let currentMergeDiffs: ParagraphDiff[] = [];
 
 // ── Init ───────────────────────────────────────────────
 
 function main(): void {
   const container = document.getElementById('editor-container');
-  if (!container) {
-    throw new Error('No se encontró #editor-container');
-  }
+  if (!container) throw new Error('No se encontró #editor-container');
 
   initEditor(container);
 
-  // Toolbar buttons
+  // Toolbar
   document.getElementById('btn-snapshot')?.addEventListener('click', handleSnapshot);
   document.getElementById('btn-history')?.addEventListener('click', toggleSidebar);
   document.getElementById('btn-close-sidebar')?.addEventListener('click', closeSidebar);
 
-  // Merge panel buttons
+  // Merge panel
   document.getElementById('btn-accept-all')?.addEventListener('click', handleAcceptAll);
   document.getElementById('btn-reject-all')?.addEventListener('click', closeMergePanel);
   document.getElementById('btn-close-merge')?.addEventListener('click', closeMergePanel);
@@ -77,9 +80,7 @@ function toggleSidebar(): void {
   const sidebar = document.getElementById('sidebar');
   if (sidebar) {
     sidebar.classList.toggle('hidden');
-    if (!sidebar.classList.contains('hidden')) {
-      renderSnapshotList();
-    }
+    if (!sidebar.classList.contains('hidden')) renderSnapshotList();
   }
 }
 
@@ -115,59 +116,54 @@ function renderSnapshotList(): void {
     )
     .join('');
 
-  // Attach event listeners
-  list.querySelectorAll('.btn-compare').forEach((btn) => {
-    btn.addEventListener('click', () => compareWithSnapshot((btn as HTMLElement).dataset.id!));
-  });
+  // Compare button
+  list.querySelectorAll('.btn-compare').forEach((btn) =>
+    btn.addEventListener('click', () => compareWithSnapshot((btn as HTMLElement).dataset.id!))
+  );
 
-  list.querySelectorAll('.btn-restore').forEach((btn) => {
+  // Restore button
+  list.querySelectorAll('.btn-restore').forEach((btn) =>
     btn.addEventListener('click', () => {
+      const id = (btn as HTMLElement).dataset.id!;
       if (confirm('¿Restaurar esta versión? El contenido actual se reemplazará.')) {
-        // TODO: restore snapshot content to editor
-        const id = (btn as HTMLElement).dataset.id!;
         const content = getSnapshotContent(id);
         if (content) {
-          // Replace editor content
-          const cm = document.querySelector('.cm-content');
-          if (cm) {
-            // Trigger Yjs transaction to replace content
-            import('./editor').then(() => {
-              // For now, use a simple approach
-              document.dispatchEvent(
-                new CustomEvent('enmienda:restore', { detail: { content, snapshotId: id } })
-              );
-            });
-          }
+          // Create snapshot of current state before restoring
+          createSnapshot('Auto: antes de restaurar');
+          replaceContent(content);
+          renderSnapshotList();
+          closeSidebar();
         }
       }
-    });
-  });
+    })
+  );
 
-  list.querySelectorAll('.btn-delete-snap').forEach((btn) => {
+  // Delete button
+  list.querySelectorAll('.btn-delete-snap').forEach((btn) =>
     btn.addEventListener('click', () => {
       const id = (btn as HTMLElement).dataset.id!;
       if (confirm('¿Eliminar esta instantánea?')) {
         deleteSnapshot(id);
         renderSnapshotList();
       }
-    });
-  });
+    })
+  );
 }
 
 // ── Merge panel ────────────────────────────────────────
 
 function compareWithSnapshot(snapshotId: string): void {
   const current = getContent();
-  const snapshot = getSnapshotContent(snapshotId);
+  const snapshotContent = getSnapshotContent(snapshotId);
   const meta = getSnapshots().find((s) => s.id === snapshotId);
 
-  if (!snapshot) {
+  if (!snapshotContent) {
     alert('No se encontró el contenido de la instantánea.');
     return;
   }
 
   currentMergeSnapshotId = snapshotId;
-  const diffs = computeParagraphDiff(snapshot, current);
+  currentMergeDiffs = computeParagraphDiff(snapshotContent, current);
 
   // Update merge label
   const label = document.getElementById('merge-label');
@@ -175,25 +171,25 @@ function compareWithSnapshot(snapshotId: string): void {
     label.textContent = `${meta.label} (${formatTime(meta.timestamp)})`;
   }
 
-  // Render diffs
+  renderMergeDiffs();
+  document.getElementById('merge-panel')?.classList.remove('hidden');
+}
+
+function renderMergeDiffs(): void {
   const content = document.getElementById('merge-content');
   if (!content) return;
 
-  content.innerHTML = diffs
+  content.innerHTML = currentMergeDiffs
     .map(
       (d, i) => `
     <div class="merge-paragraph ${d.op}" data-index="${i}">
-      ${escapeHtml(d.text)}
+      <div class="merge-para-text">${escapeHtml(d.text)}</div>
       ${
         d.op !== 'unchanged'
           ? `
       <div class="merge-para-actions">
         <button class="btn-accept" data-index="${i}">✓ Aceptar</button>
-        ${
-          d.op === 'added'
-            ? ''
-            : '<button class="btn-reject" data-index="' + i + '">✗ Rechazar</button>'
-        }
+        <button class="btn-reject" data-index="${i}">✗ Rechazar</button>
       </div>`
           : ''
       }
@@ -201,34 +197,52 @@ function compareWithSnapshot(snapshotId: string): void {
     )
     .join('');
 
-  // Attach listeners
-  content.querySelectorAll('.btn-accept').forEach((btn) => {
-    btn.addEventListener('click', () => acceptParagraph(parseInt((btn as HTMLElement).dataset.index!)));
-  });
+  // Accept button — apply this paragraph's change
+  content.querySelectorAll('.btn-accept').forEach((btn) =>
+    btn.addEventListener('click', () => {
+      const idx = parseInt((btn as HTMLElement).dataset.index!);
+      const diff = currentMergeDiffs[idx];
+      if (!diff) return;
 
-  content.querySelectorAll('.btn-reject').forEach((btn) => {
-    btn.addEventListener('click', () => rejectParagraph(parseInt((btn as HTMLElement).dataset.index!)));
-  });
+      if (diff.op === 'added') {
+        // Insert new paragraph at position
+        appendParagraph(diff.text);
+      } else if (diff.op === 'modified' || diff.op === 'deleted') {
+        // Replace paragraph
+        applyParagraphChange(diff.paragraphIndex, diff.text, diff.oldText || '');
+      }
 
-  // Show panel
-  document.getElementById('merge-panel')?.classList.remove('hidden');
+      // Remove this diff from the list
+      currentMergeDiffs[idx] = { ...diff, op: 'unchanged' };
+      renderMergeDiffs();
+    })
+  );
+
+  // Reject button — keep current version for this paragraph
+  content.querySelectorAll('.btn-reject').forEach((btn) =>
+    btn.addEventListener('click', () => {
+      const idx = parseInt((btn as HTMLElement).dataset.index!);
+      if (currentMergeDiffs[idx]) {
+        currentMergeDiffs[idx] = { ...currentMergeDiffs[idx], op: 'unchanged' };
+      }
+      renderMergeDiffs();
+    })
+  );
 }
 
 function closeMergePanel(): void {
   document.getElementById('merge-panel')?.classList.add('hidden');
   currentMergeSnapshotId = null;
+  currentMergeDiffs = [];
 }
 
 function handleAcceptAll(): void {
   if (!currentMergeSnapshotId) return;
-  const snapshot = getSnapshotContent(currentMergeSnapshotId);
-  if (snapshot) {
-    // Accept all = restore the snapshot content
-    document.dispatchEvent(
-      new CustomEvent('enmienda:restore', {
-        detail: { content: snapshot, snapshotId: currentMergeSnapshotId },
-      })
-    );
+  const snapshotContent = getSnapshotContent(currentMergeSnapshotId);
+  if (snapshotContent) {
+    createSnapshot('Auto: antes de aceptar todo');
+    replaceContent(snapshotContent);
+    renderSnapshotList();
   }
   closeMergePanel();
 }
@@ -239,8 +253,6 @@ function computeParagraphDiff(oldText: string, newText: string): ParagraphDiff[]
   const oldParas = splitParagraphs(oldText);
   const newParas = splitParagraphs(newText);
   const results: ParagraphDiff[] = [];
-
-  // Simple line-by-line diff (LCS-based would be better, but this works for now)
   const maxLen = Math.max(oldParas.length, newParas.length);
 
   for (let i = 0; i < maxLen; i++) {
@@ -248,13 +260,19 @@ function computeParagraphDiff(oldText: string, newText: string): ParagraphDiff[]
     const newP = newParas[i];
 
     if (oldP === undefined && newP !== undefined) {
-      results.push({ op: 'added', text: newP });
+      results.push({ op: 'added', text: newP, paragraphIndex: i });
     } else if (newP === undefined && oldP !== undefined) {
-      results.push({ op: 'deleted', text: oldP });
+      results.push({ op: 'deleted', text: oldP, paragraphIndex: i, oldText: oldP });
     } else if (oldP === newP) {
-      results.push({ op: 'unchanged', text: oldP });
+      results.push({ op: 'unchanged', text: oldP, paragraphIndex: i });
     } else {
-      results.push({ op: 'modified', text: newP, snapshotText: oldP });
+      results.push({
+        op: 'modified',
+        text: newP,
+        snapshotText: oldP,
+        paragraphIndex: i,
+        oldText: oldP,
+      });
     }
   }
 
@@ -262,41 +280,22 @@ function computeParagraphDiff(oldText: string, newText: string): ParagraphDiff[]
 }
 
 function splitParagraphs(text: string): string[] {
-  // Split on double newlines (Markdown paragraph boundary)
   return text
     .split(/\n\n+/)
     .map((p) => p.trim())
     .filter((p) => p.length > 0);
 }
 
-// ── Merge accept/reject ────────────────────────────────
-
-function acceptParagraph(_index: number): void {
-  // TODO: Apply accepted paragraph to current document
-  // For MVP, we'll implement full paragraph merge later
-  flashMergeParagraph(_index, 'accepted');
-}
-
-function rejectParagraph(_index: number): void {
-  flashMergeParagraph(_index, 'rejected');
-}
-
-function flashMergeParagraph(index: number, action: 'accepted' | 'rejected'): void {
-  const el = document.querySelector(`.merge-paragraph[data-index="${index}"]`);
-  if (!el) return;
-  const color = action === 'accepted' ? 'var(--green)' : 'var(--red)';
-  (el as HTMLElement).style.transition = 'opacity 0.3s';
-  (el as HTMLElement).style.borderLeftColor = color;
-  setTimeout(() => {
-    (el as HTMLElement).style.opacity = '0.3';
-  }, 100);
+function appendParagraph(text: string): void {
+  const current = getContent();
+  const newContent = current + (current ? '\n\n' : '') + text;
+  replaceContent(newContent);
 }
 
 // ── Helpers ────────────────────────────────────────────
 
 function formatTime(ts: number): string {
-  const d = new Date(ts);
-  return d.toLocaleString('es-ES', {
+  return new Date(ts).toLocaleString('es-ES', {
     day: '2-digit',
     month: '2-digit',
     year: 'numeric',

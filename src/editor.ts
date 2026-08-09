@@ -146,6 +146,44 @@ export function deleteSnapshot(snapshotId: string): void {
   saveSnapshotsList();
 }
 
+/** Replace entire document content (used for restore and merge) */
+export function replaceContent(newContent: string): void {
+  if (!ydoc) return;
+  ydoc.transact(() => {
+    ytext!.delete(0, ytext!.length);
+    ytext!.insert(0, newContent);
+  });
+}
+
+/** Apply a paragraph-level diff acceptance: replace one paragraph */
+export function applyParagraphChange(
+  paragraphIndex: number,
+  newText: string,
+  _originalText: string
+): void {
+  if (!ydoc || !ytext) return;
+
+  const currentText = ytext.toString();
+  const paragraphs = currentText.split(/\n\n+/);
+
+  if (paragraphIndex >= paragraphs.length) {
+    // Append new paragraph
+    const newContent = currentText + (currentText ? '\n\n' : '') + newText;
+    replaceContent(newContent);
+    return;
+  }
+
+  // Replace the specific paragraph
+  const oldParagraph = paragraphs[paragraphIndex];
+  const startIndex = currentText.indexOf(oldParagraph);
+  if (startIndex === -1) return;
+
+  ydoc.transact(() => {
+    ytext!.delete(startIndex, oldParagraph.length);
+    ytext!.insert(startIndex, newText);
+  });
+}
+
 // ── Private helpers ────────────────────────────────────
 
 function updateWordCount(): void {
