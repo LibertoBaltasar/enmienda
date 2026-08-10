@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Enmienda — Corrector editorial</title>
     <link rel="stylesheet" href="/src/style.css" />
+    <link rel="stylesheet" href="/src/folio.css" />
   </head>
   <body>
     <div id="app">
@@ -17,6 +18,7 @@
         <div class="toolbar-center">
           <button id="btn-open" title="Abrir archivo">📂 Abrir</button>
           <button id="btn-save" title="Guardar archivo">💾 Guardar</button>
+          <button id="btn-folio" title="Alternar vista código/folio">📄 Folio</button>
           <button id="btn-snapshot" title="Crear instantánea">📸 Instantánea</button>
           <button id="btn-history" title="Historial de versiones">🕐 Historial</button>
         </div>
@@ -25,14 +27,21 @@
         </div>
       </header>
 
-      <!-- Main area: editor + sidebar -->
+      <!-- Main area: editor/folio + sidebar -->
       <div id="main-area">
+        <!-- Code editor -->
         <div id="editor-container"></div>
+        <!-- Folio view (hidden by default) -->
+        <div id="folio-view" class="hidden"></div>
+
         <aside id="sidebar" class="hidden">
           <div class="sidebar-header">
             <h3>Historial</h3>
             <button id="btn-close-sidebar">✕</button>
           </div>
+          <!-- Version graph -->
+          <div id="version-graph"></div>
+          <!-- Snapshot list -->
           <div id="snapshot-list">
             <p class="empty-state">Sin instantáneas todavía.<br>Crea una con 📸</p>
           </div>

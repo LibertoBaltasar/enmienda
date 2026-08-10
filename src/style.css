@@ -330,3 +330,40 @@ html, body {
 .cm-editor .cm-activeLine {
   background: rgba(255, 255, 255, 0.03);
 }
+
+/* === Version graph === */
+#version-graph {
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border);
+  min-height: 80px;
+  overflow-x: auto;
+}
+
+#version-graph svg {
+  display: block;
+}
+
+#version-graph .empty-state {
+  text-align: center;
+  color: var(--text-dim);
+  font-size: 12px;
+  padding: 12px 0;
+}
+
+.graph-node {
+  cursor: pointer;
+  transition: opacity 0.15s;
+}
+.graph-node:hover {
+  opacity: 0.8;
+}
+.graph-node text {
+  font-family: var(--font-sans);
+  font-size: 10px;
+  fill: var(--text-dim);
+}
+.graph-edge {
+  stroke: var(--border);
+  stroke-width: 2;
+  fill: none;
+}

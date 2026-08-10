@@ -24,6 +24,7 @@ export interface SnapshotMeta {
   label: string;
   timestamp: number;
   wordCount: number;
+  parentId?: string; // for version graph
 }
 
 // ── State ──────────────────────────────────────────────
@@ -34,6 +35,7 @@ let ytext: Y.Text | null = null;
 let indexeddbProvider: IndexeddbPersistence | null = null;
 let snapshots: SnapshotMeta[] = [];
 let currentDocName = 'Sin título.md';
+let currentSnapshotParent: string | null = null; // last snapshot id (for graph)
 
 // ── Public API ─────────────────────────────────────────
 
@@ -110,6 +112,7 @@ export function createSnapshot(label?: string): SnapshotMeta {
     label: label || `Instantánea ${snapshots.length + 1}`,
     timestamp: Date.now(),
     wordCount: getWordCount(),
+    parentId: currentSnapshotParent || undefined,
   };
 
   // Store snapshot content in localStorage (keyed by id)
@@ -118,8 +121,14 @@ export function createSnapshot(label?: string): SnapshotMeta {
 
   snapshots.unshift(snapshot);
   saveSnapshotsList();
+  currentSnapshotParent = snapshot.id;
 
   return snapshot;
+}
+
+/** Set the current snapshot parent (for graph branching after restore) */
+export function setSnapshotParent(snapshotId: string): void {
+  currentSnapshotParent = snapshotId;
 }
 
 /** Get all snapshots (sorted newest first) */
