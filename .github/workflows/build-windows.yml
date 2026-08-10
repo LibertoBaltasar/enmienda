@@ -26,8 +26,10 @@ jobs:
         with:
           args: --target x86_64-pc-windows-msvc
 
-      - name: Upload .exe artifact
+      - name: Upload installers
         uses: actions/upload-artifact@v4
         with:
           name: Enmienda-Windows
-          path: src-tauri/target/release/bundle/msi/*.msi
+          path: |
+            src-tauri/target/x86_64-pc-windows-msvc/release/bundle/msi/*.msi
+            src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/*.exe
