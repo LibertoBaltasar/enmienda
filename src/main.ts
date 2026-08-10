@@ -5,7 +5,7 @@
  *   - Code editor (CodeMirror) / Folio view toggle
  *   - Snapshot system with version graph (parent-child DAG)
  *   - Paragraph-level diff & merge
- *   - File open/save via Tauri
+ *   - File open/save via Tauri (supports .docx, .odt, .pdf, .txt, .md)
  */
 
 import {
@@ -21,6 +21,7 @@ import {
   setSnapshotParent,
 } from './editor';
 import { renderFolio } from './folio';
+import { importToMarkdown } from './convert';
 
 // ── Tauri plugins (lazy) ───────────────────────────────
 
@@ -301,21 +302,47 @@ function handleAcceptAll() {
 // ── File system ────────────────────────────────────────
 
 async function handleOpen() {
-  if (!tauriDialog) return alert('Solo disponible en la app de escritorio.');
+  if (!tauriDialog || !tauriFs) return alert('Solo disponible en la app de escritorio.');
   try {
-    const selected = await tauriDialog.open({ multiple: false, filters: [{ name: 'Markdown', extensions: ['md'] }] });
+    const selected = await tauriDialog.open({
+      multiple: false,
+      filters: [{
+        name: 'Documentos editables',
+        extensions: ['md', 'docx', 'odt', 'txt', 'pdf'],
+      }],
+    });
     if (!selected) return;
+
     const path = typeof selected === 'string' ? selected : selected.path;
-    const content = await tauriFs.readTextFile(path);
+
+    // Read file as binary for conversion
+    const buf = await tauriFs.readFile(path);
+
+    // Convert to Markdown
+    const result = await importToMarkdown(path, buf);
+
+    if (!result.markdown && result.warnings.length > 0) {
+      alert(`No se pudo importar:\n${result.warnings.join('\n')}`);
+      return;
+    }
+
+    // Save current content as snapshot before loading
     if (getContent().trim()) createSnapshot('Auto: antes de abrir');
-    replaceContent(content);
-    currentFilePath = path;
-    const name = path.split('/').pop() || path.split('\\').pop() || 'Sin título.md';
+
+    replaceContent(result.markdown);
+    currentFilePath = null; // Force "Save As" — original is preserved
+    const name = path.split('/').pop() || path.split('\\').pop() || 'Sin título';
     setDocName(name);
     const el = document.getElementById('doc-name'); if (el) el.textContent = name;
+
     renderSnapshotList(); renderVersionGraph();
     if (isFolioMode) renderFolioView();
-  } catch (e: any) { alert(`Error: ${e}`); }
+
+    // Show conversion warnings
+    if (result.warnings.length > 0) {
+      alert(`📄 Importado desde ${result.sourceFormat}\n\n⚠️ ${result.warnings.join('\n')}`);
+    }
+  } catch (e: any) { alert(`Error al abrir: ${e}`); }
 }
 
 async function handleSave() {
